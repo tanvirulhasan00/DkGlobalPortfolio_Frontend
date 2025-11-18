@@ -60,7 +60,7 @@ const Career: React.FC = () => {
         "Strong portfolio showcasing design skills",
         "Knowledge of textile and garment construction",
       ],
-      isActive: true,
+      isActive: false,
     },
     {
       id: 2,
@@ -77,7 +77,7 @@ const Career: React.FC = () => {
         "Strong knowledge of quality control processes",
         "Excellent leadership and communication skills",
       ],
-      isActive: true,
+      isActive: false,
     },
     {
       id: 3,
@@ -94,7 +94,7 @@ const Career: React.FC = () => {
         "Knowledge of AQL standards",
         "Attention to detail",
       ],
-      isActive: true,
+      isActive: false,
     },
     {
       id: 4,
@@ -111,7 +111,7 @@ const Career: React.FC = () => {
         "Knowledge of social media platforms",
         "Excellent communication skills",
       ],
-      isActive: true,
+      isActive: false,
     },
     {
       id: 5,
