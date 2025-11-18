@@ -215,7 +215,7 @@ const AboutUs = () => {
             >
               Request Catalog
             </Link>
-            <div className="inline-flex items-center justify-center ">
+            <div className="inline-flex items-center justify-center max-sm:mt-2">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
