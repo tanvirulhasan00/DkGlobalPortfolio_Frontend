@@ -19,10 +19,105 @@ export default function PdfFlipBookReal({
   const [isClient, setIsClient] = useState(false);
   const [pdfImages, setPdfImages] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [zoomLevel, setZoomLevel] = useState<number>(1.5); // Default zoom level
+  const [zoomLevel, setZoomLevel] = useState<number>(1.5);
+
+  // Enhanced responsive state
+  const [screenSize, setScreenSize] = useState<
+    "xs" | "sm" | "md" | "lg" | "xl"
+  >("lg");
+
+  // Enhanced responsive detection
+  useEffect(() => {
+    const updateScreenSize = () => {
+      const width = window.innerWidth;
+      if (width < 480) {
+        setScreenSize("xs");
+      } else if (width < 640) {
+        setScreenSize("sm");
+      } else if (width < 768) {
+        setScreenSize("md");
+      } else if (width < 1024) {
+        setScreenSize("lg");
+      } else {
+        setScreenSize("xl");
+      }
+    };
+
+    updateScreenSize();
+    window.addEventListener("resize", updateScreenSize);
+    return () => window.removeEventListener("resize", updateScreenSize);
+  }, []);
+
+  // Enhanced responsive sizes with better scaling
+  const getResponsiveSizes = () => {
+    switch (screenSize) {
+      case "xs": // Extra small mobile (0-480px)
+        return {
+          mode: "single" as const,
+          bookWidth: Math.min(320, window.innerWidth - 40),
+          bookHeight: 400,
+          pageWidth: Math.min(300, window.innerWidth - 60),
+          pageHeight: 380,
+          zoomLevel: 1.2,
+        };
+      case "sm": // Small mobile (480-640px)
+        return {
+          mode: "single" as const,
+          bookWidth: Math.min(380, window.innerWidth - 40),
+          bookHeight: 480,
+          pageWidth: Math.min(360, window.innerWidth - 60),
+          pageHeight: 460,
+          zoomLevel: 1.3,
+        };
+      case "md": // Tablet (640-768px)
+        return {
+          mode: "double" as const,
+          bookWidth: Math.min(700, window.innerWidth - 40),
+          bookHeight: 500,
+          pageWidth: 340,
+          pageHeight: 480,
+          zoomLevel: 1.4,
+        };
+      case "lg": // Small desktop (768-1024px)
+        return {
+          mode: "double" as const,
+          bookWidth: Math.min(900, window.innerWidth - 40),
+          bookHeight: 580,
+          pageWidth: 440,
+          pageHeight: 560,
+          zoomLevel: 1.5,
+        };
+      case "xl": // Large desktop (1024px+)
+      default:
+        return {
+          mode: "double" as const,
+          bookWidth: Math.min(1200, window.innerWidth - 80),
+          bookHeight: 700,
+          pageWidth: 580,
+          pageHeight: 680,
+          zoomLevel: 1.6,
+        };
+    }
+  };
+
+  const {
+    mode,
+    bookWidth,
+    bookHeight,
+    pageWidth,
+    pageHeight: basePageHeight,
+    zoomLevel: responsiveZoom,
+  } = getResponsiveSizes();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const pdfUrl = pdfUrl1;
+
+  // Set responsive zoom on mount and screen size change
+  useEffect(() => {
+    if (isClient) {
+      setZoomLevel(responsiveZoom);
+    }
+  }, [screenSize, isClient, responsiveZoom]);
 
   // Client-side only
   useEffect(() => {
@@ -102,10 +197,18 @@ export default function PdfFlipBookReal({
     // Wait for animation to complete
     await new Promise((resolve) => setTimeout(resolve, 600));
 
-    if (direction === "next" && currentPage < numPages - 1) {
-      setCurrentPage((prev) => prev + 2);
-    } else if (direction === "prev" && currentPage > 1) {
-      setCurrentPage((prev) => prev - 2);
+    if (direction === "next") {
+      if (mode === "single") {
+        setCurrentPage((prev) => Math.min(prev + 1, numPages));
+      } else {
+        setCurrentPage((prev) => Math.min(prev + 2, numPages));
+      }
+    } else if (direction === "prev") {
+      if (mode === "single") {
+        setCurrentPage((prev) => Math.max(prev - 1, 1));
+      } else {
+        setCurrentPage((prev) => Math.max(prev - 2, 1));
+      }
     }
 
     setIsFlipping(false);
@@ -114,17 +217,19 @@ export default function PdfFlipBookReal({
   const goToPrevPage = () => flipPage("prev");
   const goToNextPage = () => flipPage("next");
 
-  // Zoom functions
+  // Enhanced zoom functions with responsive limits
   const zoomIn = () => {
-    setZoomLevel((prev) => Math.min(prev + 0.2, 3)); // Max zoom 3x
+    const maxZoom = screenSize === "xs" ? 2.5 : screenSize === "sm" ? 2.7 : 3;
+    setZoomLevel((prev) => Math.min(prev + 0.2, maxZoom));
   };
 
   const zoomOut = () => {
-    setZoomLevel((prev) => Math.max(prev - 0.2, 0.5)); // Min zoom 0.5x
+    const minZoom = screenSize === "xs" ? 0.8 : screenSize === "sm" ? 0.9 : 0.5;
+    setZoomLevel((prev) => Math.max(prev - 0.2, minZoom));
   };
 
   const resetZoom = () => {
-    setZoomLevel(1.5);
+    setZoomLevel(responsiveZoom);
   };
 
   interface VisiblePage {
@@ -135,27 +240,46 @@ export default function PdfFlipBookReal({
   const getVisiblePages = (): VisiblePage[] => {
     const pages: VisiblePage[] = [];
 
-    // Always show current page as right page
+    if (mode === "single") {
+      // mobile → show only current page
+      pages.push({ pageNumber: currentPage, position: "right" });
+      return pages;
+    }
+
+    // double-page mode (tablet & desktop)
     const leftPage = currentPage > 1 ? currentPage - 1 : null;
     const rightPage = currentPage;
 
-    if (leftPage) {
-      pages.push({ pageNumber: leftPage, position: "left" });
-    }
+    if (leftPage) pages.push({ pageNumber: leftPage, position: "left" });
     pages.push({ pageNumber: rightPage, position: "right" });
 
     return pages;
   };
 
+  // Calculate dynamic dimensions with better mobile scaling
+  const getScaledDimensions = () => {
+    const baseScale = zoomLevel / responsiveZoom;
+    const scaleFactor =
+      screenSize === "xs" ? 0.9 : screenSize === "sm" ? 0.95 : 1;
+
+    return {
+      scaledBookWidth: bookWidth * baseScale * scaleFactor,
+      scaledBookHeight: bookHeight * baseScale * scaleFactor,
+      scaledPageWidth: pageWidth * baseScale * scaleFactor,
+      scaledPageHeight: basePageHeight * baseScale * scaleFactor,
+    };
+  };
+
+  const {
+    scaledBookWidth,
+    scaledBookHeight,
+    scaledPageWidth,
+    scaledPageHeight,
+  } = getScaledDimensions();
+
   const renderPageWithFlip = (pageNumber: number, position: PagePosition) => {
     const isLeftPage = position === "left";
     const pageImage = pdfImages[pageNumber - 1];
-
-    // Calculate dynamic dimensions based on zoom level
-    const baseWidth = 780;
-    const baseHeight = 700;
-    const scaledWidth = baseWidth * (zoomLevel / 1.5);
-    const scaledHeight = baseHeight * (zoomLevel / 1.5);
 
     return (
       <motion.div
@@ -164,8 +288,8 @@ export default function PdfFlipBookReal({
           bg-white border border-gray-200 ${isLeftPage ? "rounded-l-lg" : "rounded-r-lg"} 
           overflow-hidden shadow-lg`}
         style={{
-          width: scaledWidth,
-          height: scaledHeight,
+          width: scaledPageWidth,
+          height: scaledPageHeight,
           transformStyle: "preserve-3d",
           transformOrigin: isLeftPage ? "right center" : "left center",
         }}
@@ -205,7 +329,7 @@ export default function PdfFlipBookReal({
         }}
       >
         <div
-          className="w-full h-full relative "
+          className="w-full h-full relative"
           style={{ transformStyle: "preserve-3d" }}
         >
           {/* Front of page - Actual PDF content */}
@@ -222,8 +346,8 @@ export default function PdfFlipBookReal({
             ) : (
               <div className="w-full h-full flex items-center justify-center">
                 <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
-                  <div className="text-gray-500 text-sm">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500 mx-auto mb-2"></div>
+                  <div className="text-gray-500 text-xs sm:text-sm">
                     Loading page {pageNumber}
                   </div>
                 </div>
@@ -244,7 +368,9 @@ export default function PdfFlipBookReal({
               borderRight: !isLeftPage ? "1px solid #e5e7eb" : "none",
             }}
           >
-            <div className="text-gray-400 text-sm">Page {pageNumber}</div>
+            <div className="text-gray-400 text-xs sm:text-sm">
+              Page {pageNumber}
+            </div>
           </div>
         </div>
       </motion.div>
@@ -253,16 +379,33 @@ export default function PdfFlipBookReal({
 
   const visiblePages = getVisiblePages();
 
+  // Enhanced page display text
+  const getPageDisplayText = () => {
+    if (mode === "single") {
+      return `Page ${currentPage} of ${numPages}`;
+    } else {
+      if (currentPage > 1) {
+        return `Pages ${currentPage - 1}-${currentPage} of ${numPages}`;
+      } else {
+        return `Pages 1-${currentPage} of ${numPages}`;
+      }
+    }
+  };
+
   if (!isClient) {
     return (
-      <div className="flex flex-col items-center justify-center w-full py-10 bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
-        <div className="text-center mb-8">
-          <h2 className="text-3xl font-bold text-gray-800 mb-2">{title}</h2>
+      <div className="flex flex-col items-center justify-center w-full py-4 sm:py-6 md:py-10 bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen px-4">
+        <div className="text-center mb-4 sm:mb-6 md:mb-8">
+          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-800 mb-2">
+            {title}
+          </h2>
         </div>
-        <div className="w-[1560px] h-[720px] bg-white rounded-xl shadow-lg flex items-center justify-center">
+        <div className="w-full max-w-[320px] sm:max-w-[380px] md:max-w-[900px] h-[300px] sm:h-[400px] md:h-[580px] bg-white rounded-xl shadow-lg flex items-center justify-center">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-            <div className="text-gray-500">Initializing PDF Viewer...</div>
+            <div className="animate-spin rounded-full h-8 w-8 sm:h-10 sm:w-10 md:h-12 md:w-12 border-b-2 border-blue-500 mx-auto mb-2 sm:mb-3 md:mb-4"></div>
+            <div className="text-gray-500 text-sm sm:text-base">
+              Initializing PDF Viewer...
+            </div>
           </div>
         </div>
       </div>
@@ -270,44 +413,53 @@ export default function PdfFlipBookReal({
   }
 
   return (
-    <div className="flex flex-col items-center justify-center w-full py-10 bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <div className="flex flex-col items-center justify-center w-full py-4 sm:py-6 md:py-10 bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen px-4">
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="text-center mb-8"
+        className="text-center mb-4 sm:mb-6 md:mb-8"
       >
-        <h2 className="text-3xl font-bold text-gray-800 mb-2">{title}</h2>
+        <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-800 mb-2">
+          {title}
+        </h2>
       </motion.div>
 
       {error && (
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-center max-w-md"
+          className="mb-4 sm:mb-6 p-3 sm:p-4 bg-red-50 border border-red-200 rounded-xl text-center w-full max-w-md mx-auto"
         >
-          <p className="text-red-600 mb-2">{error}</p>
+          <p className="text-red-600 text-sm sm:text-base">{error}</p>
         </motion.div>
       )}
 
       {!error && (
-        <div className="relative">
+        <div className="relative w-full flex flex-col items-center">
           {/* Zoom Controls */}
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="flex items-center justify-center gap-4 mb-6"
+            className="flex items-center justify-center mb-4 sm:mb-6 w-full"
           >
-            <div className="bg-white/90 backdrop-blur-sm rounded-full shadow-lg px-4 py-2 flex items-center gap-4">
+            <div className="bg-white/90 backdrop-blur-sm rounded-full shadow-lg px-3 py-1 sm:px-4 sm:py-2 flex items-center gap-2 sm:gap-4">
               <button
                 onClick={zoomOut}
-                disabled={zoomLevel <= 0.5 || isLoading}
-                className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                disabled={
+                  zoomLevel <=
+                    (screenSize === "xs"
+                      ? 0.8
+                      : screenSize === "sm"
+                        ? 0.9
+                        : 0.5) || isLoading
+                }
+                className="p-1 sm:p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 title="Zoom Out"
               >
                 <svg
-                  className="w-5 h-5"
+                  className="w-4 h-4 sm:w-5 sm:h-5"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -321,18 +473,25 @@ export default function PdfFlipBookReal({
                 </svg>
               </button>
 
-              <span className="text-sm font-medium text-gray-700 min-w-[60px] text-center">
+              <span className="text-xs sm:text-sm font-medium text-gray-700 min-w-[50px] sm:min-w-[60px] text-center">
                 {Math.round(zoomLevel * 100)}%
               </span>
 
               <button
                 onClick={zoomIn}
-                disabled={zoomLevel >= 3 || isLoading}
-                className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                disabled={
+                  zoomLevel >=
+                    (screenSize === "xs"
+                      ? 2.5
+                      : screenSize === "sm"
+                        ? 2.7
+                        : 3) || isLoading
+                }
+                className="p-1 sm:p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 title="Zoom In"
               >
                 <svg
-                  className="w-5 h-5"
+                  className="w-4 h-4 sm:w-5 sm:h-5"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -350,8 +509,8 @@ export default function PdfFlipBookReal({
 
               <button
                 onClick={resetZoom}
-                disabled={zoomLevel === 1.5 || isLoading}
-                className="px-3 py-1 text-xs bg-blue-500 text-white rounded-full hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                disabled={zoomLevel === responsiveZoom || isLoading}
+                className="px-2 py-1 text-xs bg-blue-500 text-white rounded-full hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Reset
               </button>
@@ -363,22 +522,19 @@ export default function PdfFlipBookReal({
             ref={containerRef}
             className="relative flex items-center justify-center"
             style={{
-              width: 1560 * (zoomLevel / 1.5),
-              height: 720 * (zoomLevel / 1.5),
+              width: scaledBookWidth,
+              height: scaledBookHeight,
             }}
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.5 }}
           >
-            {/* Book Spine */}
-            {/* <div className="absolute inset-y-4 left-1/2 transform -translate-x-1/2 w-2 bg-gradient-to-r from-gray-600 to-gray-700 rounded-lg z-10 shadow-2xl" /> */}
-
             {/* Pages Container */}
             <div
               className="relative flex justify-center"
               style={{
-                width: 1560 * (zoomLevel / 1.5),
-                height: 700 * (zoomLevel / 1.5),
+                width: scaledBookWidth,
+                height: scaledPageHeight,
               }}
             >
               <AnimatePresence mode="wait">
@@ -393,18 +549,18 @@ export default function PdfFlipBookReal({
             {/* Page Curl Effect */}
             {isFlipping && (
               <motion.div
-                className="absolute top-0 bottom-0 w-6 bg-gradient-to-r from-transparent via-gray-200 to-transparent opacity-50 z-20"
+                className="absolute top-0 bottom-0 w-4 sm:w-6 bg-gradient-to-r from-transparent via-gray-200 to-transparent opacity-50 z-20"
                 initial={{
                   x:
                     flipDirection === "next"
-                      ? -780 * (zoomLevel / 1.5)
-                      : 780 * (zoomLevel / 1.5),
+                      ? -(scaledPageWidth / (mode === "single" ? 1 : 2))
+                      : scaledPageWidth / (mode === "single" ? 1 : 2),
                 }}
                 animate={{
                   x:
                     flipDirection === "next"
-                      ? 780 * (zoomLevel / 1.5)
-                      : -780 * (zoomLevel / 1.5),
+                      ? scaledPageWidth
+                      : -scaledPageWidth,
                 }}
                 transition={{ duration: 0.6, ease: "easeInOut" }}
               />
@@ -412,67 +568,75 @@ export default function PdfFlipBookReal({
           </motion.div>
 
           {/* Navigation Controls */}
-          {numPages > 2 && !error && (
+          {numPages > (mode === "single" ? 1 : 2) && !error && (
             <motion.div
-              className="flex items-center gap-6 mt-8"
+              className="flex items-center gap-3 sm:gap-4 md:gap-6 mt-4 sm:mt-6 md:mt-8 flex-col sm:flex-row"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.3 }}
             >
-              <button
-                onClick={goToPrevPage}
-                disabled={currentPage <= 1 || isFlipping || isLoading}
-                className="px-8 py-4 bg-white rounded-full shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-2 border border-gray-200 hover:bg-gray-50 text-lg"
-              >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+              <div className="flex items-center gap-3 sm:gap-4 md:gap-6 w-full sm:w-auto justify-between">
+                <button
+                  onClick={goToPrevPage}
+                  disabled={
+                    (mode === "single" ? currentPage <= 1 : currentPage <= 1) ||
+                    isFlipping ||
+                    isLoading
+                  }
+                  className="px-4 py-2 sm:px-6 sm:py-3 md:px-8 md:py-4 bg-white rounded-full shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-1 sm:gap-2 border border-gray-200 hover:bg-gray-50 text-sm sm:text-base"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 19l-7-7 7-7"
-                  />
-                </svg>
-                Previous
-              </button>
+                  <svg
+                    className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 19l-7-7 7-7"
+                    />
+                  </svg>
+                  <span className="hidden xs:inline">Previous</span>
+                </button>
 
-              <div className="flex items-center gap-4 bg-white/80 backdrop-blur-sm px-6 py-3 rounded-full shadow-lg text-lg">
-                <span className="text-sm text-gray-600">Spread</span>
-                <span className="font-semibold text-gray-800">
-                  {currentPage > 1
-                    ? `${currentPage - 1}-${currentPage}`
-                    : `1-${currentPage}`}
-                </span>
-                <span className="text-gray-400">of</span>
-                <span className="font-semibold text-gray-800">{numPages}</span>
+                <div className="flex items-center gap-2 sm:gap-3 md:gap-4 bg-white/80 backdrop-blur-sm px-3 py-2 sm:px-4 sm:py-2 md:px-6 md:py-3 rounded-full shadow-lg text-sm sm:text-base">
+                  <span className="text-xs text-gray-600 hidden xs:inline">
+                    {mode === "single" ? "Page" : "Spread"}
+                  </span>
+                  <span className="font-semibold text-gray-800 text-xs sm:text-sm">
+                    {getPageDisplayText()}
+                  </span>
+                </div>
+
+                <button
+                  onClick={goToNextPage}
+                  disabled={
+                    (mode === "single"
+                      ? currentPage >= numPages
+                      : currentPage >= numPages - 1) ||
+                    isFlipping ||
+                    isLoading
+                  }
+                  className="px-4 py-2 sm:px-6 sm:py-3 md:px-8 md:py-4 bg-white rounded-full shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-1 sm:gap-2 border border-gray-200 hover:bg-gray-50 text-sm sm:text-base"
+                >
+                  <span className="hidden xs:inline">Next</span>
+                  <svg
+                    className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                </button>
               </div>
-
-              <button
-                onClick={goToNextPage}
-                disabled={
-                  currentPage >= numPages - 1 || isFlipping || isLoading
-                }
-                className="px-8 py-4 bg-white rounded-full shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-2 border border-gray-200 hover:bg-gray-50 text-lg"
-              >
-                Next
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
-              </button>
             </motion.div>
           )}
         </div>
@@ -483,21 +647,21 @@ export default function PdfFlipBookReal({
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.5 }}
-        className={` mt-8 p-6 bg-white rounded-xl shadow-lg border border-gray-200 text-center`}
+        className="w-full max-w-md sm:max-w-lg mt-4 sm:mt-6 md:mt-8 p-4 sm:p-5 md:p-6 bg-white rounded-xl shadow-lg border border-gray-200 text-center"
       >
-        <h3 className="text-lg font-semibold text-gray-800 mb-2">
+        <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-2">
           Download Full Report
         </h3>
-        <p className="text-gray-600 mb-4">
+        <p className="text-gray-600 text-sm sm:text-base mb-3 sm:mb-4">
           Click below to download the complete Fire Safety Compliance Report PDF
         </p>
         <Link
           to={pdfUrl}
           download="Fire-Safety-Compliance-Report.pdf"
-          className={`inline-flex items-center gap-2 px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors shadow-md hover:shadow-lg`}
+          className="inline-flex items-center gap-2 px-4 py-2 sm:px-5 sm:py-2.5 md:px-6 md:py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors shadow-md hover:shadow-lg text-sm sm:text-base"
         >
           <svg
-            className="w-5 h-5"
+            className="w-4 h-4 sm:w-5 sm:h-5"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -509,7 +673,7 @@ export default function PdfFlipBookReal({
               d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
             />
           </svg>
-          Download PDF Report
+          Download PDF
         </Link>
       </motion.div>
     </div>
